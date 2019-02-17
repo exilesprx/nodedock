@@ -1,0 +1,94 @@
+version: '3'
+
+networks:
+  frontend:
+    driver: ${NETWORKS_DRIVER}
+  backend:
+    driver: ${NETWORKS_DRIVER}
+
+volumes:
+  mongo:
+    driver: ${VOLUMES_DRIVER}
+
+services:
+
+### Workspace Utilities ##################################
+  workspace:
+    build:
+      context: ./workspace
+      args:
+        - NODE_VERSION=${NODE_VERSION}
+        - NODE_ENV=${NODE_ENV}
+        - YARN_VERSION=${WORKSPACE_YARN_VERSION}
+        - INSTALL_NODE=${WORKSPACE_INSTALL_NODE}
+        - NPM_REGISTRY=${WORKSPACE_NPM_REGISTRY}
+        - INSTALL_YARN=${WORKSPACE_INSTALL_YARN}
+        - PUID=${WORKSPACE_PUID}
+        - PGID=${WORKSPACE_PGID}
+        - TZ=${WORKSPACE_TIMEZONE}
+    volumes:
+      - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+    extra_hosts:
+      - "dockerhost:${DOCKER_HOST_IP}"
+    tty: true
+    environment: {}
+    networks:
+      - frontend
+      - backend
+
+### NodeJS ##############################################
+  node:
+    build:
+      context: ./node
+      args:
+        - NODE_VERSION=${NODE_VERSION}
+        - YARN_VERSION=${NODE_YARN_VERSION}
+        - INSTALL_YARN=${NODE_INSTALL_YARN}
+        - INSTALL_INTL=${NODE_INSTALL_INTL}
+        - NPM_START_SCRIPT=${NODE_NPM_START_SCRIPT}
+    volumes:
+      - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+    expose:
+      - "9000"
+      - "9229"
+    extra_hosts:
+      - "dockerhost:${DOCKER_HOST_IP}"
+    environment:
+      - DOCKER_HOST=tcp://docker-in-docker:2375
+    depends_on:
+      - workspace
+    networks:
+      - backend
+    links:
+      - docker-in-docker
+
+### NGINX Server #########################################
+  nginx:
+    build:
+      context: ./nginx
+      args:
+        - NODE_UPSTREAM_CONTAINER=${NGINX_NODE_UPSTREAM_CONTAINER}
+        - NODE_UPSTREAM_PORT=${NGINX_NODE_UPSTREAM_PORT}
+    volumes:
+      - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+      - ${NGINX_HOST_LOG_PATH}:/var/log/nginx
+      - ${NGINX_SITES_PATH}:/etc/nginx/sites-available
+    ports:
+      - "${NGINX_HOST_HTTP_PORT}:80"
+      - "${NGINX_HOST_HTTPS_PORT}:443"
+    depends_on:
+      - node
+    networks:
+      - frontend
+      - backend
+
+### Docker-in-Docker ################################################
+  docker-in-docker:
+    image: docker:dind
+    privileged: true
+    volumes:
+      - ${APP_CODE_PATH_HOST}:${APP_CODE_PATH_CONTAINER}
+    expose:
+      - 2375
+    networks:
+      - backend
